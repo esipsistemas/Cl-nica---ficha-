@@ -1,1 +1,682 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Ficha Clínica — Sistema Completo (com PIN)</title>
+<!-- Dependências via CDN: jsPDF e html2canvas (para gerar PDFs com imagens) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+:root{--brand:#0ea5a4;--muted:#666}
+*{box-sizing:border-box}
+body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:#f6f7fb;color:#111}
+.header{background:linear-gradient(90deg,var(--brand),#7dd3fc);color:#fff;padding:14px 18px;display:flex;align-items:center;justify-content:space-between}
+.header h1{margin:0;font-size:18px}
+.container{max-width:1100px;margin:18px auto;padding:12px}
+.grid{display:grid;grid-template-columns:320px 1fr;gap:12px}
+.card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 8px 24px rgba(17,24,39,0.06)}
+.controls{display:flex;gap:8px;align-items:center}
+.input,button,select,textarea{padding:8px;border-radius:8px;border:1px solid #e6e6f2}
+.button{background:var(--brand);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+.small{font-size:13px;color:var(--muted)}
+.client-list{max-height:520px;overflow:auto;margin-top:8px}
+.client-item{padding:8px;border-radius:8px;border:1px solid #f0eef8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.form-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.form-row .col{flex:1}
+.photo-preview{width:80px;height:80px;border-radius:8px;object-fit:cover;border:1px solid #eee}
+.signature{border:1px solid #ddd;border-radius:6px}
+.note{font-size:13px;color:var(--muted);margin-top:8px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+@media(max-width:480px){
+  .header{flex-direction:column;align-items:flex-start;gap:8px}
+  .controls{flex-wrap:wrap;width:100%}
+  .client-item{flex-direction:column;align-items:flex-start}
+}
+
+/* PIN overlay - estilo 2: moderno premium (glass + sombra) */
+#pinOverlay{
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(rgba(2,6,23,0.6), rgba(2,6,23,0.6));
+  z-index:9999;
+}
+.pin-card{
+  width:360px;max-width:90%;background:rgba(255,255,255,0.06);backdrop-filter:blur(8px) saturate(120%);
+  border-radius:14px;padding:22px;border:1px solid rgba(255,255,255,0.08);box-shadow:0 8px 40px rgba(2,6,23,0.6);color:#fff;
+}
+.pin-card h2{margin:0 0 8px 0;font-size:18px}
+.pin-card p{margin:0 0 14px 0;color:rgba(255,255,255,0.85)}
+.pin-input{width:100%;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.03);color:#fff;margin-bottom:8px;font-size:16px}
+.pin-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+.pin-btn{padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+.pin-btn.primary{background:var(--brand);color:#042;}
+
+/* small help text in pin modal */
+.pin-small{font-size:13px;color:rgba(255,255,255,0.7);margin-top:8px}
+</style>
+</head>
+<body>
+<!-- PIN overlay (invisible until needed) -->
+<div id="pinOverlay" style="display:none">
+  <div class="pin-card" id="pinCard">
+    <!-- content injected dynamically -->
+  </div>
+</div>
+
+<header class="header">
+  <h1>Ficha Clínica / Estética — Sistema (Offline)</h1>
+  <div class="controls">
+    <button class="button" id="btnBackup">Exportar JSON</button>
+    <button class="button" id="btnImport">Importar JSON</button>
+    <button class="button" id="btnPDFAll">Exportar todos (PDF)</button>
+  </div>
+</header>
+<main class="container" id="appRoot" aria-hidden="true">
+  <div class="grid">
+    <aside class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>Clientes</strong>
+        <div style="display:flex;gap:6px">
+          <input id="searchClient" class="input" placeholder="Pesquisar..." />
+          <button id="btnNewClient" class="button">+ Cliente</button>
+        </div>
+      </div>
+      <div class="client-list" id="clientList"></div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button id="btnClearLocal" class="input">Limpar dados</button>
+        <button id="btnPin" class="input">PIN / Segurança</button>
+      </div>
+      <div class="note">Dados salvos no navegador (localStorage). Use Exportar para backup.</div>
+    </aside>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>
+          <strong>Ficha / Procedimentos</strong>
+          <div class="small">Crie ficha, registre procedimentos, fotos e termo assinado no celular.</div>
+        </div>
+        <div class="kv">
+          <select id="selectClient" class="input"></select>
+          <button id="btnNewProcedure" class="button">+ Procedimento</button>
+        </div>
+      </div>
+
+      <div id="procedureArea"></div>
+
+    </section>
+  </div>
+</main>
+
+<!-- modal container (existing) -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);align-items:center;justify-content:center;z-index:99;padding:20px">
+  <div style="background:#fff;padding:14px;border-radius:12px;max-width:720px;width:100%;max-height:90vh;overflow:auto">
+    <div id="modalContent"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button id="modalCancel" class="input">Cancelar</button>
+      <button id="modalSave" class="button">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==========================
+   SISTEMA FICHA CLÍNICA - COM PIN (TEMA 2)
+========================== */
+const STORAGE_KEY='ficha_clinica_v1';
+const PIN_HASH_KEY='ficha_pin_hash_v1';
+const PIN_SALT_KEY='ficha_pin_salt_v1';
+let DB={clients:[]};
+const $=id=>document.getElementById(id);
+function uid(p='id'){return p+Math.random().toString(36).slice(2,9)}
+function save(){localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));}
+function load(){const s=localStorage.getItem(STORAGE_KEY);DB=s?JSON.parse(s):{clients:[]};}
+function todayStr(d=new Date()){return d.toISOString().split('T')[0]}
+
+/* Safe escapeHtml */
+function escapeHtml(t){
+  const s = (t == null) ? '' : String(t);
+  return s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[m]));
+}
+
+/* Filename sanitizer */
+function sanitizeFileName(name){
+  if(!name) return 'file';
+  const n = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return n.replace(/[^a-zA-Z0-9-_\.]/g,'_').replace(/_+/g,'_').replace(/^_+|_+$/g,'');
+}
+
+/* SHA-256 helper (returns hex) */
+async function sha256Hex(message){
+  const enc = new TextEncoder();
+  const data = enc.encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+/* generate random salt (hex) */
+function randomHex(len=16){
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+/* PIN helpers */
+async function setPin(pin){
+  const salt = randomHex(8); // 8 bytes
+  const h = await sha256Hex(pin + salt);
+  localStorage.setItem(PIN_SALT_KEY, salt);
+  localStorage.setItem(PIN_HASH_KEY, h);
+}
+async function verifyPin(pin){
+  const salt = localStorage.getItem(PIN_SALT_KEY);
+  const hash = localStorage.getItem(PIN_HASH_KEY);
+  if(!salt || !hash) return false;
+  const h = await sha256Hex(pin + salt);
+  return h === hash;
+}
+function clearPin(){
+  localStorage.removeItem(PIN_SALT_KEY);
+  localStorage.removeItem(PIN_HASH_KEY);
+}
+
+/* PIN Overlay UI management (style 2: modern premium) */
+const pinOverlay = document.createElement('div');
+pinOverlay.id = 'pinOverlay';
+pinOverlay.style.display = 'none';
+pinOverlay.innerHTML = `<div class="pin-card" id="pinCard"></div>`;
+document.body.appendChild(pinOverlay);
+
+/* show pin overlay with provided HTML content (string) and callbacks */
+function showPin(contentHtml){
+  const card = document.getElementById('pinCard');
+  card.innerHTML = contentHtml;
+  pinOverlay.style.display = 'flex';
+  // focus first input if exists
+  setTimeout(()=>{ const i = card.querySelector('input'); if(i) i.focus(); },40);
+}
+function hidePin(){ pinOverlay.style.display = 'none'; }
+
+/* PIN flows */
+async function requirePinOnLoad(){
+  // if no PIN configured -> show setup modal (require creation)
+  const hash = localStorage.getItem(PIN_HASH_KEY);
+  if(!hash){
+    // Setup PIN
+    showPin(`
+      <h2>Configurar PIN</h2>
+      <p>Defina um PIN para proteger seus dados neste navegador.</p>
+      <input id="pin_new" class="pin-input" type="password" placeholder="Digite o PIN (ex: 4 dígitos)">
+      <input id="pin_confirm" class="pin-input" type="password" placeholder="Confirme o PIN">
+      <div class="pin-actions">
+        <button id="pin_skip" class="pin-btn">Pular</button>
+        <button id="pin_save" class="pin-btn primary">Salvar PIN</button>
+      </div>
+      <div class="pin-small">Você pode mudar ou desativar o PIN depois em "PIN / Segurança".</div>
+    `);
+    document.getElementById('pin_save').onclick = async () => {
+      const p = document.getElementById('pin_new').value.trim();
+      const c = document.getElementById('pin_confirm').value.trim();
+      if(!p) return alert('PIN não pode ser vazio');
+      if(p !== c) return alert('PIN e confirmação não conferem');
+      await setPin(p);
+      hidePin();
+      initApp(); // continue
+    };
+    document.getElementById('pin_skip').onclick = () => {
+      // allow skipping PIN creation (user choice)
+      hidePin();
+      initApp();
+    };
+  } else {
+    // ask for PIN
+    showPin(`
+      <h2>Digite seu PIN</h2>
+      <p>Insira o PIN para desbloquear o sistema.</p>
+      <input id="pin_input" class="pin-input" type="password" placeholder="PIN">
+      <div class="pin-actions">
+        <button id="pin_forgot" class="pin-btn">Esqueci</button>
+        <button id="pin_ok" class="pin-btn primary">Entrar</button>
+      </div>
+      <div class="pin-small">Se esquecer o PIN, você pode restaurar os dados com o arquivo JSON exportado.</div>
+    `);
+    document.getElementById('pin_ok').onclick = async () => {
+      const p = document.getElementById('pin_input').value.trim();
+      if(!p) return alert('Digite o PIN');
+      const ok = await verifyPin(p);
+      if(ok){ hidePin(); initApp(); }
+      else alert('PIN incorreto');
+    };
+    document.getElementById('pin_forgot').onclick = ()=> {
+      if(confirm('Deseja remover o PIN localmente? (Isso não recupera o PIN — você poderá definir um novo, mas deve confirmar que deseja proceder)')){
+        clearPin();
+        alert('PIN removido localmente. Crie um novo PIN na próxima abertura.');
+        hidePin();
+        initApp();
+      }
+    };
+  }
+}
+
+/* -------------------
+   Aplicação - código existente (ajustado para iniciar somente após PIN)
+   ------------------- */
+
+/* Modal genérico (existing) */
+function openModal(html,onSave){return new Promise(res=>{
+  $('modalContent').innerHTML=html;
+  $('modal').style.display='flex';
+  $('modalSave').style.display = '';
+  $('modalCancel').onclick=()=>{ $('modal').style.display='none'; res(false); };
+  $('modalSave').onclick=async()=>{ 
+    // Auto-capture any canvas inside modal
+    try{
+      const canv = document.querySelector('#modalContent canvas');
+      if(canv){
+        const rect = canv.getBoundingClientRect();
+        const tmp = document.createElement('canvas');
+        tmp.width = Math.round(rect.width)||canv.width;
+        tmp.height = Math.round(rect.height)||canv.height;
+        tmp.getContext('2d').drawImage(canv,0,0,tmp.width,tmp.height);
+        window._temp_signature = tmp.toDataURL('image/png');
+      }
+    }catch(e){}
+    const r=await onSave(); if(r!==false){ $('modal').style.display='none'; res(true);} 
+  };
+});}
+function openInfoModal(html){$('modalContent').innerHTML=html; $('modal').style.display='flex'; $('modalSave').style.display='none'; $('modalCancel').onclick=()=>{ $('modal').style.display='none'; $('modalSave').style.display='block'; }}
+
+/* File → Base64 */
+function fileToBase64(file){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(file);})}
+
+/* Resto do aplicativo (mesmo código já corrigido) */
+function renderClients(filter=''){
+  const listEl=$('clientList'); listEl.innerHTML='';
+  const clients=DB.clients.filter(c=>(c.name||'').toLowerCase().includes(filter.toLowerCase()));
+  clients.forEach(c=>{
+    const div=document.createElement('div'); div.className='client-item';
+    div.innerHTML=`
+      <div style="display:flex;gap:8px;align-items:center">
+        <img src="${c.photo||''}" class="photo-preview" style="${c.photo?'':'display:none'}" />
+        <div>
+          <div style="font-weight:600">${escapeHtml(c.name)}</div>
+          <div class="small">${escapeHtml(c.phone||'')}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="input" data-id="${c.id}" data-action="open">Abrir</button>
+        <button class="input" data-id="${c.id}" data-action="export">JSON</button>
+        <button class="input" data-id="${c.id}" data-action="del">Apagar</button>
+      </div>`;
+    listEl.appendChild(div);
+  });
+  const sel=$('selectClient');
+  sel.innerHTML='<option value="">-- Selecionar cliente --</option>'+
+    DB.clients.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+}
+
+/* Cliente Modal */
+async function openClientModal(id=null){
+  const c=id?DB.clients.find(x=>x.id===id):{id:null,name:'',phone:'',birth:'',notes:'',photo:null,procedures:[]};
+  const html=`<h3>Ficha do Cliente</h3>
+    <div class='form-row'><div class='col'><label>Nome</label><input id='m_name' class='input' value='${escapeHtml(c.name)}'/></div></div>
+    <div class='form-row'><div class='col'><label>Telefone</label><input id='m_phone' class='input' value='${escapeHtml(c.phone||'')}'/></div>
+    <div class='col'><label>Nascimento</label><input id='m_birth' type='date' class='input' value='${c.birth||''}'/></div></div>
+    <div><label>Observações</label><textarea id='m_notes' class='input' style='width:100%'>${escapeHtml(c.notes||'')}</textarea></div>
+    <div style='margin-top:8px'><label>Foto</label><input id='m_photo' type='file' accept='image/*'></div>
+    <img id='m_preview' class='photo-preview' src='${c.photo||''}' style='${c.photo?'':'display:none'};margin-top:8px'>`;
+
+  await openModal(html, async()=>{
+    const name=$('m_name').value.trim(); if(!name) return alert('Nome obrigatório');
+    const phone=$('m_phone').value.trim(); const birth=$('m_birth').value; const notes=$('m_notes').value.trim();
+    let photo=c.photo||null;
+    const f=$('m_photo').files[0]; if(f) photo=await fileToBase64(f);
+    if(c.id){Object.assign(c,{name,phone,birth,notes,photo}); const i=DB.clients.findIndex(x=>x.id===c.id); DB.clients[i]=c;}
+    else DB.clients.push({id:uid('c_'),name,phone,birth,notes,photo,procedures:[]});
+    save(); renderClients($('searchClient').value||'');
+  });
+
+  setTimeout(()=>{
+    const inp = $('m_photo');
+    if(!inp) return;
+    inp.onchange=async()=>{const f=inp.files[0]; if(!f) return; const b=await fileToBase64(f); $('m_preview').src=b; $('m_preview').style.display='block';};
+  },100);
+}
+
+/* Procedimentos */
+async function openProcedureModal(cid,pid=null){
+  const client=DB.clients.find(x=>x.id===cid);
+  if(!client) return alert('Cliente não encontrado');
+  const p=pid?client.procedures.find(x=>x.id===pid):{id:null,date:todayStr(),procedure:'',professional:'',products:'',notes:'',before:null,after:null,signature:null};
+  const html=`<h3>Procedimento - ${escapeHtml(client.name)}</h3>
+    <div class='form-row'><div class='col'><label>Data</label><input id='p_date' type='date' class='input' value='${p.date}'/></div>
+    <div class='col'><label>Procedimento</label><input id='p_name' class='input' value='${escapeHtml(p.procedure)}'/></div></div>
+    <div class='form-row'><div class='col'><label>Profissional</label><input id='p_prof' class='input' value='${escapeHtml(p.professional||'')}'/></div>
+    <div class='col'><label>Produtos</label><input id='p_prod' class='input' value='${escapeHtml(p.products||'')}'/></div></div>
+    <div><label>Observações</label><textarea id='p_notes' class='input' style='width:100%'>${escapeHtml(p.notes||'')}</textarea></div>
+
+    <div style='display:flex;gap:10px;margin-top:8px'>
+      <div style='min-width:160px'><label>Antes</label><input id='p_before' type='file' accept='image/*'><img id='preview_before' class='photo-preview' src='${p.before||''}' style='${p.before?'':'display:none'};margin-top:4px'></div>
+      <div style='min-width:160px'><label>Depois</label><input id='p_after' type='file' accept='image/*'><img id='preview_after' class='photo-preview' src='${p.after||''}' style='${p.after?'':'display:none'};margin-top:4px'></div>
+    </div>
+
+    <div style='margin-top:8px'>
+      <label>Assinatura</label>
+      <div style='border:1px solid #eee;padding:8px;border-radius:6px;margin-top:6px'>
+        <canvas id='sig_canvas' width='1000' height='300' class='signature' style='width:100%;height:150px;display:block;'></canvas>
+        <div style='display:flex;gap:8px;margin-top:6px'><button id='sig_clear' class='input'>Limpar</button><button id='sig_save' class='input'>Salvar assinatura</button></div>
+      </div>
+    </div>`;
+
+  await openModal(html, async()=>{
+    // Try to capture canvas signature (if user drew but didn't click sig_save)
+    const canvas = document.getElementById('sig_canvas');
+    let sig = null;
+    try{
+      if(canvas){
+        // downscale to avoid massive base64
+        const rect = canvas.getBoundingClientRect();
+        const tmp = document.createElement('canvas');
+        tmp.width = Math.max(200, Math.round(rect.width));
+        tmp.height = Math.max(60, Math.round(rect.height));
+        const tctx = tmp.getContext('2d');
+        tctx.drawImage(canvas,0,0,tmp.width,tmp.height);
+        const blank = document.createElement('canvas');
+        blank.width = tmp.width; blank.height = tmp.height;
+        if(tmp.toDataURL() !== blank.toDataURL()){
+          sig = tmp.toDataURL('image/png');
+        }
+      }
+    }catch(e){sig = window._temp_signature || null;}
+
+    if(!sig) sig = window._temp_signature || p.signature || null;
+    delete window._temp_signature;
+
+    const date=$('p_date').value; const name=$('p_name').value.trim(); if(!date||!name) return alert('Campos obrigatórios');
+    const prof=$('p_prof').value.trim(); const prod=$('p_prod').value.trim(); const notes=$('p_notes').value.trim();
+    let before=p.before,after=p.after;
+    const fb=$('p_before').files[0]; if(fb) before=await fileToBase64(fb);
+    const fa=$('p_after').files[0]; if(fa) after=await fileToBase64(fa);
+
+    if(p.id){Object.assign(p,{date,procedure:name,professional:prof,products:prod,notes,before,after,signature:sig});}
+    else client.procedures.push({id:uid('p_'),date,procedure:name,professional:prof,products:prod,notes,before,after,signature:sig});
+
+    save(); renderProcedureArea(cid); renderClients($('searchClient').value||'');
+  });
+
+  // signature setup
+  setTimeout(()=>{
+    const canvas = $('sig_canvas'); if(!canvas) return;
+    const ctx = canvas.getContext('2d');
+    function fitCanvas(){
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const w = Math.round(rect.width * dpr);
+      const h = Math.round(rect.height * dpr);
+      if(canvas.width !== w || canvas.height !== h){
+        const old = document.createElement('canvas');
+        old.width = canvas.width; old.height = canvas.height;
+        old.getContext('2d').drawImage(canvas,0,0);
+        canvas.width = w; canvas.height = h;
+        ctx.setTransform(1,0,0,1,0,0);
+        ctx.scale(dpr,dpr);
+        ctx.drawImage(old,0,0,canvas.width/dpr,canvas.height/dpr);
+      }
+      ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
+    }
+    fitCanvas(); window.addEventListener('resize', ()=>setTimeout(fitCanvas,120));
+    let drawing=false;
+    function pos(e){ const rect = canvas.getBoundingClientRect(); return {x: e.clientX-rect.left, y: e.clientY-rect.top}; }
+    canvas.addEventListener('pointerdown', e=>{ drawing=true; const p=pos(e); ctx.beginPath(); ctx.moveTo(p.x,p.y); e.preventDefault(); });
+    canvas.addEventListener('pointermove', e=>{ if(!drawing) return; const p=pos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); e.preventDefault(); });
+    ['pointerup','pointercancel','pointerleave'].forEach(evt=>canvas.addEventListener(evt, ()=>{ drawing=false; }));
+    $('sig_clear').onclick=()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); };
+    $('sig_save').onclick=()=>{
+      const rect = canvas.getBoundingClientRect();
+      const tmp = document.createElement('canvas');
+      tmp.width = Math.round(rect.width); tmp.height = Math.round(rect.height);
+      tmp.getContext('2d').drawImage(canvas,0,0,tmp.width,tmp.height);
+      window._temp_signature = tmp.toDataURL('image/png');
+      alert('Assinatura salva');
+    };
+    const previewBefore = $('preview_before');
+    const previewAfter = $('preview_after');
+    $('p_before').onchange=async()=>{const f=$('p_before').files[0]; if(!f) return; const b=await fileToBase64(f); if(previewBefore){previewBefore.src=b; previewBefore.style.display='block';}};
+    $('p_after').onchange=async()=>{const f=$('p_after').files[0]; if(!f) return; const b=await fileToBase64(f); if(previewAfter){previewAfter.src=b; previewAfter.style.display='block';}};
+    if(p.signature){ const img=new Image(); img.onload = ()=> { ctx.clearRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); }; img.src = p.signature; }
+  },120);
+}
+
+/* Render Área Cliente */
+function renderProcedureArea(cid){
+  const area=$('procedureArea'); area.innerHTML=''; if(!cid) return;
+  const c=DB.clients.find(x=>x.id===cid);
+  if(!c) return;
+  const h=document.createElement('div'); h.style.display='flex'; h.style.justifyContent='space-between';
+  h.innerHTML=`<div><strong>Ficha: ${escapeHtml(c.name)}</strong><div class='small'>${escapeHtml(c.phone||'')}</div></div>
+  <div style='display:flex;gap:8px'><button id='btnExportClient' class='input'>JSON</button><button id='btnPDFClient' class='input'>PDF</button></div>`;
+  area.appendChild(h);
+
+  const obs=document.createElement('div'); obs.className='card'; obs.style.marginTop='8px'; obs.innerHTML=`<strong>Observações</strong><div class='small'>${escapeHtml(c.notes||'')}</div>`;
+  area.appendChild(obs);
+
+  const procs=document.createElement('div'); procs.style.marginTop='10px'; procs.innerHTML='<strong>Procedimentos</strong>';
+  if(!c.procedures.length) procs.innerHTML+='<div class="small">Nenhum registrado.</div>';
+  else c.procedures.slice().sort((a,b)=>a.date>b.date?-1:1).forEach(p=>{
+    const div=document.createElement('div'); div.className='card'; div.style.marginTop='8px';
+    div.innerHTML=`<div style='display:flex;justify-content:space-between;'>
+      <div><strong>${escapeHtml(p.procedure)}</strong><div class='small'>${p.date} — ${escapeHtml(p.professional||'')}</div></div>
+      <div style='display:flex;gap:8px'>
+        <button class='input' data-action='view' data-pid='${p.id}' data-cid='${cid}'>Ver</button>
+        <button class='input' data-action='edit' data-pid='${p.id}' data-cid='${cid}'>Editar</button>
+        <button class='input' data-action='del' data-pid='${p.id}' data-cid='${cid}'>Apagar</button>
+      </div></div>`;
+    procs.appendChild(div);
+  });
+  area.appendChild(procs);
+
+  setTimeout(()=>{
+    const btnExport = $('btnExportClient'); if(btnExport) btnExport.onclick=()=>downloadClientJSON(cid);
+    const btnPdf = $('btnPDFClient'); if(btnPdf) btnPdf.onclick=()=>exportClientPDF(cid);
+    procs.querySelectorAll('button').forEach(b=>{
+      b.onclick=()=>{
+        const a=b.dataset.action,pid=b.dataset.pid;
+        if(a==='view') viewProcedure(cid,pid);
+        if(a==='edit') openProcedureModal(cid,pid);
+        if(a==='del'){ if(confirm('Apagar?')){ const idx = DB.clients.findIndex(x=>x.id===cid); if(idx!==-1){ DB.clients[idx].procedures = DB.clients[idx].procedures.filter(x=>x.id!==pid); save(); renderProcedureArea(cid); renderClients(); localStorage.removeItem(STORAGE_KEY); save(); } } }
+      }
+    });
+  },50);
+}
+
+/* View Procedure */
+function viewProcedure(cid,pid){
+  const c=DB.clients.find(x=>x.id===cid);
+  if(!c) return;
+  const p=c.procedures.find(x=>x.id===pid);
+  if(!p) return;
+  let html=`<h3>${escapeHtml(p.procedure)}</h3><div><strong>Data:</strong> ${p.date}</div>
+    <div><strong>Profissional:</strong> ${escapeHtml(p.professional||'')}</div>
+    <div style='margin-top:8px'><strong>Produtos:</strong> ${escapeHtml(p.products||'')}</div>
+    <div style='margin-top:8px'><strong>Notas:</strong><div class='small'>${escapeHtml(p.notes||'')}</div></div>`;
+  if(p.before) html+=`<div style='margin-top:8px'><strong>Antes</strong><img src='${p.before}' class='photo-preview'></div>`;
+  if(p.after) html+=`<div style='margin-top:8px'><strong>Depois</strong><img src='${p.after}' class='photo-preview'></div>`;
+  if(p.signature) html+=`<div style='margin-top:8px'><strong>Assinatura</strong><img src='${p.signature}' style='max-width:100%;border:1px solid #eee;border-radius:8px'></div>`;
+  openInfoModal(html);
+}
+
+/* Export JSON geral */
+function downloadJSON(){const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ficha_clinica_backup.json'; a.click();}
+function downloadClientJSON(id){const c=DB.clients.find(x=>x.id===id); if(!c) return; const blob=new Blob([JSON.stringify(c,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cliente_'+sanitizeFileName(c.name)+'.json'; a.click();}
+
+/* Import JSON */
+function openImport(){const i=document.createElement('input'); i.type='file'; i.accept='application/json'; i.onchange=()=>{
+  const f=i.files[0]; const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const data=JSON.parse(e.target.result);
+      if(data.clients){DB=data; save(); renderClients(); alert('Importado');}
+      else if(data.id){const ex=DB.clients.find(x=>x.id===data.id); if(ex){if(confirm('Substituir?')){DB.clients=DB.clients.map(c=>c.id===data.id?data:c);} } else DB.clients.push(data); save(); renderClients();}
+    }catch(err){alert('Arquivo inválido')}
+  };
+  r.readAsText(f);
+}; i.click();}
+
+/* PDF export - multi-page handling */
+async function exportClientPDF(id){
+  const c=DB.clients.find(x=>x.id===id); if(!c) return;
+  const wrap=document.createElement('div'); wrap.style.width='700px'; wrap.style.padding='14px'; wrap.style.background='#fff';
+  wrap.innerHTML=`<h2>Ficha - ${escapeHtml(c.name)}</h2>
+  <div><strong>Telefone:</strong> ${escapeHtml(c.phone||'')}</div>
+  <div><strong>Nascimento:</strong> ${escapeHtml(c.birth||'')}</div>
+  <div style='margin-top:8px'><strong>Observações:</strong><div>${escapeHtml(c.notes||'')}</div></div>`;
+  c.procedures.forEach(p=>{
+    const d=document.createElement('div'); d.style.marginTop='10px';
+    d.innerHTML=`<h3>${escapeHtml(p.procedure)}</h3><div>${p.date} — ${escapeHtml(p.professional||'')}</div><div>${escapeHtml(p.notes||'')}</div>`;
+    if(p.before) d.innerHTML+=`<div><img src='${p.before}' style='max-width:100%'></div>`;
+    if(p.after) d.innerHTML+=`<div><img src='${p.after}' style='max-width:100%'></div>`;
+    if(p.signature) d.innerHTML+=`<div><img src='${p.signature}' style='max-width:100%'></div>`;
+    wrap.appendChild(d);
+  });
+  document.body.appendChild(wrap);
+  try{
+    const canvas = await html2canvas(wrap, {scale:2});
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jspdf.jsPDF('p','pt','a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pdfWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    let position = 0;
+    pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+    while (imgHeight - Math.abs(position) > pdfHeight) {
+      position -= pdfHeight;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+    }
+    pdf.save('ficha_'+sanitizeFileName(c.name||'cliente')+'.pdf');
+  }catch(e){alert('Erro PDF: '+(e && e.message ? e.message : e));}
+  document.body.removeChild(wrap);
+}
+
+async function exportAllToPDF(){ for(const c of DB.clients){ await exportClientPDF(c.id); } }
+
+/* initApp - attach handlers and render content (called after PIN verified or skipped) */
+function initApp(){
+  // reveal app
+  const root = $('appRoot'); if(root) root.setAttribute('aria-hidden','false');
+  load(); renderClients();
+  $('btnBackup').onclick=downloadJSON;
+  $('btnImport').onclick=openImport;
+  $('btnPDFAll').onclick=exportAllToPDF;
+  $('btnNewClient').onclick=()=>openClientModal();
+  $('btnNewProcedure').onclick=()=>{const cid=$('selectClient').value; if(!cid) return alert('Escolha um cliente'); openProcedureModal(cid);} ;
+  $('searchClient').oninput=e=>renderClients(e.target.value);
+  $('clientList').onclick=e=>{
+    const btn = e.target.closest('button');
+    if(!btn) return;
+    const id = btn.dataset.id, a = btn.dataset.action;
+    if(a==='open'){$('selectClient').value=id; renderProcedureArea(id);} 
+    if(a==='export') downloadClientJSON(id);
+    if(a==='del'){ if(confirm('Apagar?')){ DB.clients=DB.clients.filter(c=>c.id!==id); localStorage.removeItem(STORAGE_KEY); save(); renderClients(); $('procedureArea').innerHTML=''; }}
+  };
+  $('selectClient').onchange=e=>renderProcedureArea(e.target.value);
+  $('btnClearLocal').onclick=()=>{if(confirm('Limpar tudo?')){localStorage.removeItem(STORAGE_KEY); DB={clients:[]}; save(); renderClients(); $('procedureArea').innerHTML='';}};
+  // PIN management UI
+  $('btnPin').onclick=async()=>{
+    const hash = localStorage.getItem(PIN_HASH_KEY);
+    if(!hash){
+      // set new PIN
+      showPin(`
+        <h2>Definir novo PIN</h2>
+        <p>Defina um novo PIN para proteger seus dados.</p>
+        <input id="pin_new2" class="pin-input" type="password" placeholder="Digite o PIN">
+        <input id="pin_confirm2" class="pin-input" type="password" placeholder="Confirme o PIN">
+        <div class="pin-actions">
+          <button id="pin_cancel2" class="pin-btn">Cancelar</button>
+          <button id="pin_save2" class="pin-btn primary">Salvar</button>
+        </div>
+      `);
+      document.getElementById('pin_save2').onclick = async ()=> {
+        const p = document.getElementById('pin_new2').value.trim();
+        const c = document.getElementById('pin_confirm2').value.trim();
+        if(!p) return alert('PIN inválido');
+        if(p !== c) return alert('Confirmação não confere');
+        await setPin(p);
+        alert('PIN salvo');
+        hidePin();
+      };
+      document.getElementById('pin_cancel2').onclick = ()=>hidePin();
+    } else {
+      // change or disable PIN: verify current first
+      showPin(`
+        <h2>Alterar / Desativar PIN</h2>
+        <p>Digite o PIN atual para acessar opções.</p>
+        <input id="pin_current" class="pin-input" type="password" placeholder="PIN atual">
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+          <button id="pin_cancel3" class="pin-btn">Cancelar</button>
+          <button id="pin_verify3" class="pin-btn primary">Verificar</button>
+        </div>
+      `);
+      document.getElementById('pin_cancel3').onclick = ()=>hidePin();
+      document.getElementById('pin_verify3').onclick = async ()=> {
+        const p = document.getElementById('pin_current').value.trim();
+        if(!p) return alert('Digite o PIN');
+        const ok = await verifyPin(p);
+        if(!ok) return alert('PIN incorreto');
+        // show options to change or disable
+        showPin(`
+          <h2>Opções PIN</h2>
+          <p>Escolha uma ação.</p>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button id="pin_change" class="pin-btn primary">Alterar PIN</button>
+            <button id="pin_disable" class="pin-btn">Desativar PIN</button>
+            <button id="pin_cancel4" class="pin-btn">Fechar</button>
+          </div>
+        `);
+        document.getElementById('pin_change').onclick = ()=> {
+          showPin(`
+            <h2>Alterar PIN</h2>
+            <p>Digite o novo PIN.</p>
+            <input id="pin_new3" class="pin-input" type="password" placeholder="Novo PIN">
+            <input id="pin_confirm3" class="pin-input" type="password" placeholder="Confirme novo PIN">
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+              <button id="pin_cancel5" class="pin-btn">Cancelar</button>
+              <button id="pin_save3" class="pin-btn primary">Salvar</button>
+            </div>
+          `);
+          document.getElementById('pin_save3').onclick = async ()=> {
+            const a = document.getElementById('pin_new3').value.trim();
+            const b = document.getElementById('pin_confirm3').value.trim();
+            if(!a) return alert('PIN inválido');
+            if(a !== b) return alert('Confirmação não confere');
+            await setPin(a);
+            alert('PIN alterado');
+            hidePin();
+          };
+          document.getElementById('pin_cancel5').onclick = ()=> hidePin();
+        };
+        document.getElementById('pin_disable').onclick = ()=> {
+          if(confirm('Deseja desativar o PIN? Isso removerá a proteção localmente.')){
+            clearPin();
+            alert('PIN desativado');
+            hidePin();
+          }
+        };
+        document.getElementById('pin_cancel4').onclick = ()=> hidePin();
+      };
+    }
+  };
+}
+
+/* On load: do not initialize full app until PIN verification (or skip) */
+window.onload = async ()=>{
+  load(); // load DB in memory but do not render until PIN allow
+  // hide app root visually until unlocked
+  const root = $('appRoot'); if(root) root.setAttribute('aria-hidden','true');
+  await requirePinOnLoad();
+};
+</script>
+</body>
+</html>
 
