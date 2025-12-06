@@ -1,1 +1,246 @@
-teste
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Agenda Inteligente - Gerenciador de Clientes</title>
+<!-- libraries -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--accent:#5b21b6;--muted:#666}
+*{box-sizing:border-box}
+body{font-family:Inter,system-ui,Segoe UI,Roboto,"Helvetica Neue",Arial;margin:0;background:#f7f7fb;color:#111}
+.header{background:linear-gradient(90deg,#6d28d9,#a78bfa);color:#fff;padding:18px 20px;display:flex;align-items:center;justify-content:space-between}
+.header h1{margin:0;font-size:18px}
+.container{max-width:1100px;margin:18px auto;padding:12px}
+.grid{display:grid;grid-template-columns:320px 1fr;gap:12px}
+.card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 6px 18px rgba(20,20,50,0.06)}
+.controls{display:flex;gap:8px;align-items:center}
+.input,button,select,textarea{padding:8px;border-radius:8px;border:1px solid #e6e6f2}
+.button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+.small{font-size:13px;color:var(--muted)}
+.client-list{max-height:420px;overflow:auto;margin-top:8px}
+.client-item{padding:8px;border-radius:8px;border:1px solid #f0eef8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.appointments{padding:12px}
+.app-row{display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px dashed #eee}
+.tag{padding:4px 8px;border-radius:6px;background:#f1f5f9;color:#111;font-weight:600}
+.kv{display:flex;gap:8px;align-items:center}
+.search{display:flex;gap:8px}
+.footer-actions{display:flex;gap:8px;flex-wrap:wrap}
+.note{font-size:13px;color:var(--muted);margin-top:8px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="header">
+  <h1>Agenda Inteligente — Gerenciador de Clientes</h1>
+  <div class="controls">
+    <button class="button" id="btnImport">Importar JSON</button>
+    <button class="button" id="btnExport">Exportar JSON</button>
+    <button class="button" id="btnPDF">Exportar PDF</button>
+  </div>
+</header>
+<main class="container">
+  <div class="grid">
+    <aside class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <strong>Clientes</strong>
+        <div class="kv">
+          <input id="searchClient" class="input" placeholder="Pesquisar..." />
+          <button id="btnNewClient" class="button">+ Cliente</button>
+        </div>
+      </div>
+      <div class="client-list" id="clientList"></div>
+      <div class="note">Cada cliente tem ficha, histórico e agendamentos. Clique para editar.</div>
+    </aside>
+
+    <section class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong>Agenda — Hoje: <span id="todayLabel"></span></strong>
+          <div class="small">Visualize, crie e mova horários — sem servidor (local JSON).</div>
+        </div>
+        <div class="kv">
+          <select id="viewSelect" class="input">
+            <option value="day">Dia</option>
+            <option value="week">Semana</option>
+          </select>
+          <input id="datePicker" class="input" type="date" />
+          <button class="button" id="btnNewAppt">+ Agendamento</button>
+        </div>
+      </div>
+
+      <div id="appointments" class="appointments"></div>
+
+      <div style="margin-top:12px" class="footer-actions">
+        <button id="btnClearLocal" class="input">Limpar local (apagar tudo)</button>
+        <div class="small">&nbsp;</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- modals (simple) -->
+<div id="modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;z-index:99">
+  <div style="background:#fff;padding:16px;border-radius:12px;max-width:640px;width:100%">
+    <div id="modalContent"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button id="modalCancel" class="input">Cancelar</button>
+      <button id="modalSave" class="button">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Simple local JSON-based agenda
+const STORAGE_KEY = 'agenda_inteligente_data_v1';
+let DB = {clients:[], appointments:[]};
+// helpers
+const $ = id=>document.getElementById(id);
+function uid(prefix='id'){return prefix+Math.random().toString(36).slice(2,9)}
+function save(){localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));}
+function load(){const s=localStorage.getItem(STORAGE_KEY);DB = s?JSON.parse(s):{clients:[],appointments:[]};}
+function todayStr(d=new Date()){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return y+'-'+m+'-'+day}
+
+// UI init
+const clientListEl = $('clientList');
+const appointmentsEl = $('appointments');
+const todayLabel = $('todayLabel');
+const datePicker = $('datePicker');
+const viewSelect = $('viewSelect');
+const searchClient = $('searchClient');
+
+function renderClients(filter=''){
+  clientListEl.innerHTML='';
+  const clients = DB.clients.filter(c=> (c.name||'').toLowerCase().includes(filter.toLowerCase()));
+  clients.forEach(c=>{
+    const div=document.createElement('div');div.className='client-item';
+    const left=document.createElement('div');
+    left.innerHTML=`<div style="font-weight:600">${c.name}</div><div class="small">${c.phone||''}</div>`;
+    const right=document.createElement('div');
+    right.innerHTML=`<div style="display:flex;gap:6px"><button class="input" data-id="${c.id}" data-action="open">Abrir</button><button class="input" data-id="${c.id}" data-action="export">JSON</button></div>`;
+    div.appendChild(left);div.appendChild(right);
+    clientListEl.appendChild(div);
+  });
+}
+
+function renderAppointments(dateStr=null){
+  appointmentsEl.innerHTML='';
+  let view=viewSelect.value; const base = dateStr||todayStr();
+  todayLabel.textContent = base;
+  const list = DB.appointments.slice().sort((a,b)=>a.date+a.time> b.date+b.time?1:-1);
+  if(view==='day'){
+    const dayList = list.filter(a=>a.date===base);
+    if(!dayList.length) appointmentsEl.innerHTML='<div class="small">Nenhum agendamento neste dia.</div>';
+    dayList.forEach(a=>appointmentsEl.appendChild(renderApptRow(a)));
+  } else {
+    // week view: show 7 days from base
+    const rows=document.createElement('div');
+    for(let i=0;i<7;i++){
+      const d=new Date(base);d.setDate(d.getDate()+i);
+      const ds=todayStr(d);
+      const dayHeader=document.createElement('div');dayHeader.style.marginTop='8px';dayHeader.innerHTML=`<strong>${ds}</strong>`;
+      rows.appendChild(dayHeader);
+      const items=list.filter(a=>a.date===ds);
+      if(!items.length){ const none=document.createElement('div'); none.className='small'; none.textContent='Nenhum agendamento.'; rows.appendChild(none) }
+      items.forEach(a=>rows.appendChild(renderApptRow(a)));
+    }
+    appointmentsEl.appendChild(rows);
+  }
+}
+
+function renderApptRow(a){
+  const row=document.createElement('div');row.className='app-row';
+  const left=document.createElement('div');left.innerHTML=`<div style="font-weight:600">${a.time} — ${clientName(a.clientId)||'(Cliente excluído)'} </div><div class="small">${a.note||''}</div>`;
+  const right=document.createElement('div');
+  right.innerHTML=`<div style="display:flex;gap:6px"><button class="input" data-id="${a.id}" data-action="edit">Editar</button><button class="input" data-id="${a.id}" data-action="del">Apagar</button></div>`;
+  row.appendChild(left);row.appendChild(right);
+  return row;
+}
+
+function clientName(id){const c=DB.clients.find(x=>x.id===id);return c?c.name:''}
+
+// events
+$('btnNewClient').onclick=()=>openClientModal();
+$('btnNewAppt').onclick=()=>openApptModal();
+$('btnExport').onclick=()=>downloadJSON();
+$('btnImport').onclick=()=>openImport();
+$('btnClearLocal').onclick=()=>{if(confirm('Apagar todos os dados locais?')){DB={clients:[],appointments:[]};save();renderClients();renderAppointments(datePicker.value||todayStr())}}
+$('btnPDF').onclick=()=>exportPDF();
+searchClient.oninput=(e)=>renderClients(e.target.value);
+viewSelect.onchange=()=>renderAppointments(datePicker.value||todayStr());
+datePicker.onchange=()=>renderAppointments(datePicker.value);
+clientListEl.onclick=(e)=>{const b=e.target.closest('button'); if(!b) return; const id=b.dataset.id; const act=b.dataset.action; if(act==='open') openClientModal(id); if(act==='export') downloadClientJSON(id)}
+appointmentsEl.onclick=(e)=>{const b=e.target.closest('button'); if(!b) return; const id=b.dataset.id; const act=b.dataset.action; if(act==='edit') openApptModal(id); if(act==='del'){ if(confirm('Apagar agendamento?')){DB.appointments=DB.appointments.filter(x=>x.id!==id);save();renderAppointments(datePicker.value||todayStr())}}}
+
+// modal helpers
+function openModal(html, onSave){ $('modalContent').innerHTML=html; $('modal').style.display='flex'; return new Promise(resolve=>{
+  $('modalCancel').onclick=()=>{ $('modal').style.display='none'; resolve(null); }
+  $('modalSave').onclick=async ()=>{ const res = await onSave(); $('modal').style.display='none'; resolve(res); }
+})}
+
+// client modal
+async function openClientModal(id=null){
+  const client = id?DB.clients.find(c=>c.id===id):{id:null,name:'',phone:'',notes:''};
+  const html=`<div><h3>Ficha do Cliente</h3>
+    <label>Nome</label><br><input id="m_name" class="input" value="${escapeHtml(client.name||'')}"><br>
+    <label>Telefone</label><br><input id="m_phone" class="input" value="${escapeHtml(client.phone||'')}"><br>
+    <label>Observações</label><br><textarea id="m_notes" class="input" style="width:100%">${escapeHtml(client.notes||'')}</textarea>
+    </div>`;
+  const res = await openModal(html, ()=>{
+    const name=$('m_name').value.trim(); if(!name) return alert('Nome é obrigatório');
+    if(client.id){ // update
+      client.name=name; client.phone=$('m_phone').value.trim(); client.notes=$('m_notes').value.trim();
+      const idx=DB.clients.findIndex(c=>c.id===client.id); DB.clients[idx]=client;
+    } else {
+      const newc={id:uid('c_'),name,phone:$('m_phone').value.trim(),notes:$('m_notes').value.trim()}; DB.clients.push(newc);
+    }
+    save(); renderClients(); renderAppointments(datePicker.value||todayStr());
+  });
+}
+
+// appointment modal
+async function openApptModal(id=null){
+  const appt = id?DB.appointments.find(a=>a.id===id):{id:null,date:todayStr(),time:'09:00',clientId:'',note:''};
+  const clientOptions = DB.clients.map(c=>`<option value="${c.id}" ${c.id===appt.clientId?'selected':''}>${c.name}</option>`).join('');
+  const html=`<div><h3>Agendamento</h3>
+    <label>Data</label><br><input id="m_date" class="input" type="date" value="${appt.date}"><br>
+    <label>Hora</label><br><input id="m_time" class="input" type="time" value="${appt.time}"><br>
+    <label>Cliente</label><br><select id="m_client" class="input"><option value="">-- selecionar --</option>${clientOptions}</select><br>
+    <label>Observação</label><br><textarea id="m_note" class="input" style="width:100%">${escapeHtml(appt.note||'')}</textarea>
+    </div>`;
+  const res = await openModal(html, ()=>{
+    const date=$('m_date').value; const time=$('m_time').value; const clientId=$('m_client').value; const note=$('m_note').value.trim();
+    if(!date||!time||!clientId) return alert('Data, hora e cliente são obrigatórios');
+    if(appt.id){ appt.date=date; appt.time=time; appt.clientId=clientId; appt.note=note; const idx=DB.appointments.findIndex(a=>a.id===appt.id); DB.appointments[idx]=appt; }
+    else { const newA={id:uid('a_'),date,time,clientId,note}; DB.appointments.push(newA); }
+    save(); renderAppointments(datePicker.value||todayStr());
+  });
+}
+
+// import/export
+function downloadJSON(){const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='agenda_inteligente_export.json';a.click();URL.revokeObjectURL(url)}
+function downloadClientJSON(id){const client=DB.clients.find(c=>c.id===id); if(!client) return; const appts=DB.appointments.filter(a=>a.clientId===id); const out={client,appointments:appts}; const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`cliente_${client.name.replace(/\s+/g,'_')}.json`;a.click();URL.revokeObjectURL(url)}
+function openImport(){ const input=document.createElement('input'); input.type='file'; input.accept='application/json'; input.onchange=()=>{ const f=input.files[0]; const reader=new FileReader(); reader.onload=e=>{ try{ const data=JSON.parse(e.target.result); if(data.clients && data.appointments){ DB=data; save(); renderClients(); renderAppointments(datePicker.value||todayStr()); alert('Importação completa'); } else if(data.client){ // single client import
+        const c=data.client; const exists=DB.clients.find(x=>x.id===c.id); if(!exists) DB.clients.push(c); if(Array.isArray(data.appointments)) DB.appointments.push(...data.appointments); save(); renderClients(); renderAppointments(datePicker.value||todayStr()); alert('Cliente importado'); } else { alert('Arquivo JSON desconhecido') } }catch(err){alert('Arquivo inválido')}}; reader.readAsText(f)}; input.click(); }
+
+// PDF export (basic)
+async function exportPDF(){ const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.setFontSize(14); doc.text('Agenda Inteligente - Exportação',14,18); let y=28; const date = datePicker.value||todayStr(); doc.setFontSize(11); doc.text('Data: '+date,14,y); y+=8; const list = DB.appointments.filter(a=>a.date===date).sort((a,b)=>a.time>b.time?1:-1);
+  if(!list.length){ doc.text('Nenhum agendamento',14,y); } else { list.forEach(a=>{ const line = `${a.time} - ${clientName(a.clientId)} - ${a.note||''}`; doc.text(line,14,y); y+=7; if(y>270){ doc.addPage(); y=20 } }); }
+  doc.save('agenda_'+date+'.pdf'); }
+
+function escapeHtml(t){return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+// init sample data if empty
+function seed(){ if(!DB.clients.length && !DB.appointments.length){ const c1={id:uid('c_'),name:'Maria Silva',phone:'(11) 99999-0001',notes:'Cabelo longo - prefere manhã'}; const c2={id:uid('c_'),name:'João Souza',phone:'(11) 98888-1111',notes:'Barba - taglia 10'}; DB.clients.push(c1,c2); DB.appointments.push({id:uid('a_'),date:todayStr(),time:'09:30',clientId:c1.id,note:'Corte + hidratação'},{id:uid('a_'),date:todayStr(),time:'11:00',clientId:c2.id,note:'Aparar barba'}); save(); }
+}
+
+// start
+load(); seed(); renderClients(); datePicker.value = todayStr(); renderAppointments(todayStr());
+
+// expose small tips
+console.log('Agenda Inteligente carregada — sem servidor. Use Exportar para criar backups, Importar para restaurar.');
+</script>
+</body>
+</html>
+
