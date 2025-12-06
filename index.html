@@ -1,1 +1,185 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Orçamentos Rápidos — Estética • Cirurgia • Odontologia</title>
+<!-- libs: jsPDF + html2canvas + QRCode (for optional payment QR) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{--accent:#7c3aed;--muted:#666}
+*{box-sizing:border-box}
+body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:#f4f6fb;color:#111}
+.header{background:linear-gradient(90deg,var(--accent),#60a5fa);color:#fff;padding:14px 18px;display:flex;align-items:center;justify-content:space-between}
+.container{max-width:1100px;margin:18px auto;padding:12px}
+.card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 8px 24px rgba(17,24,39,0.06);margin-bottom:12px}
+.controls{display:flex;gap:8px}
+.input,select,button,textarea{padding:8px;border-radius:8px;border:1px solid #e6e6f2}
+.button{background:var(--accent);color:#fff;border:none;padding:8px 12px;border-radius:8px;cursor:pointer}
+.small{font-size:13px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:1fr 360px;gap:12px}
+.items{max-height:320px;overflow:auto;margin-top:8px}
+.item-row{display:flex;gap:8px;align-items:center;padding:8px;border-radius:8px;border:1px solid #f0eef8;margin-bottom:8px}
+.item-row input{width:100%}
+.total-box{font-size:18px;font-weight:700}
+.history-list{max-height:420px;overflow:auto}
+.tag{background:#eef2ff;padding:6px;border-radius:6px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div><strong>Orçamentos Rápidos — 3-em-1</strong><div class="small">Estética • Cirurgia • Odontologia</div></div>
+  <div class="controls">
+    <button class="button" id="btnNew">+ Novo Orçamento</button>
+    <button class="button" id="btnExportAll">Exportar JSON</button>
+    <button class="button" id="btnImport">Importar JSON</button>
+  </div>
+</header>
+<main class="container">
+  <div class="card grid">
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <strong>Editor de Orçamento</strong>
+          <div class="small">Preencha os dados, adicione procedimentos e gere o PDF.</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <select id="category" class="input">
+            <option value="estetica">Estética</option>
+            <option value="cirurgia">Cirurgia</option>
+            <option value="odontologia">Odontologia</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+        <input id="clientName" class="input" placeholder="Nome do paciente/cliente" style="flex:2" />
+        <input id="clientPhone" class="input" placeholder="Telefone" style="flex:1" />
+        <input id="date" type="date" class="input" style="width:160px" />
+      </div>
+
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <input id="serviceName" class="input" placeholder="Procedimento" />
+        <input id="servicePrice" class="input" placeholder="Valor R$" />
+        <button id="btnAddItem" class="button">Adicionar</button>
+      </div>
+
+      <div class="items card" id="itemsBox"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px">
+        <div style="display:flex;gap:8px;align-items:center">
+          <label class="small">Desconto R$</label>
+          <input id="discount" class="input" placeholder="0.00" style="width:120px" />
+          <select id="paymentMethod" class="input" style="width:160px">
+            <option value="dinheiro">Dinheiro</option>
+            <option value="pix">Pix</option>
+            <option value="cartao">Cartão</option>
+            <option value="parcelado">Parcelado</option>
+          </select>
+        </div>
+        <div style="text-align:right">
+          <div class="small">Total</div>
+          <div class="total-box" id="totalLabel">R$ 0,00</div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="btnSave" class="button">Salvar Orçamento</button>
+        <button id="btnPDF" class="button">Gerar PDF</button>
+        <button id="btnDuplicate" class="input">Duplicar</button>
+        <button id="btnClear" class="input">Limpar</button>
+      </div>
+
+      <div style="margin-top:8px" class="small">Observação: os dados são salvos localmente no navegador. Use Exportar/Importar para backups.</div>
+    </section>
+
+    <aside>
+      <div class="card">
+        <strong>Histórico de Orçamentos</strong>
+        <div style="display:flex;margin-top:8px;gap:8px">
+          <input id="searchHistory" class="input" placeholder="Pesquisar por nome ou data" />
+          <select id="filterCat" class="input"><option value="">Todas</option><option value="estetica">Estética</option><option value="cirurgia">Cirurgia</option><option value="odontologia">Odontologia</option></select>
+        </div>
+        <div class="history-list" id="historyList" style="margin-top:8px"></div>
+      </div>
+
+      <div class="card" style="margin-top:10px">
+        <strong>Visualização Rápida / QR</strong>
+        <div id="previewBox" style="margin-top:8px"></div>
+        <div id="qrcode" style="margin-top:8px"></div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<script>
+const KEY='orcamentos_3em1_v1';
+let DB={orcamentos:[]};
+const $=id=>document.getElementById(id);
+function uid(p='id'){return p+Math.random().toString(36).slice(2,9)}
+function save(){localStorage.setItem(KEY, JSON.stringify(DB));}
+function load(){const s=localStorage.getItem(KEY);DB=s?JSON.parse(s):{orcamentos:[]};}
+function money(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}
+
+// init
+load(); renderHistory(); $('date').value = new Date().toISOString().slice(0,10);
+
+// items management
+let items=[];
+function renderItems(){ const box=$('itemsBox'); box.innerHTML=''; if(!items.length) box.innerHTML='<div class="small">Nenhum procedimento.</div>';
+  items.forEach((it,idx)=>{ const row=document.createElement('div'); row.className='item-row'; row.innerHTML=`<input data-idx="${idx}" value="${it.name}" class="input" placeholder="Procedimento" /><input data-idx-price="${idx}" value="${it.price}" class="input" placeholder="Valor" /><div style="display:flex;gap:6px"><button class="input" data-act="up" data-i="${idx}">▲</button><button class="input" data-act="down" data-i="${idx}">▼</button><button class="input" data-act="del" data-i="${idx}">✖</button></div>`; box.appendChild(row); });
+  // attach events
+  box.querySelectorAll('input').forEach(inp=>{ inp.oninput=(e)=>{ const i = inp.dataset.idx || inp.dataset.idxPrice; if(inp.dataset.idx!==undefined){ items[i].name = inp.value } else { items[i].price = parseFloat(inp.value||0) } updateTotal(); }});
+  box.querySelectorAll('button').forEach(b=>{ b.onclick=()=>{ const i=Number(b.dataset.i); const act=b.dataset.act; if(act==='up'&&i>0){ const t=items[i-1]; items[i-1]=items[i]; items[i]=t } if(act==='down'&&i<items.length-1){ const t=items[i+1]; items[i+1]=items[i]; items[i]=t } if(act==='del'){ items.splice(i,1) } renderItems(); } }); updateTotal(); }
+
+function updateTotal(){ const sum = items.reduce((s,it)=>s + (Number(it.price||0)),0); const disc = Number($('discount').value||0); const total = Math.max(0,sum - disc); $('totalLabel').textContent = money(total); }
+
+$('btnAddItem').onclick=()=>{ const n=$('serviceName').value.trim(); const p=parseFloat($('servicePrice').value.replace(',','.')||0); if(!n) return alert('Digite o serviço'); items.push({name:n,price:p}); $('serviceName').value=''; $('servicePrice').value=''; renderItems(); }
+$('discount').oninput=updateTotal;
+
+// save / generate
+$('btnSave').onclick=()=>{ const o=buildOrcamento(); if(!o) return; DB.orcamentos.unshift(o); save(); renderHistory(); alert('Orçamento salvo'); }
+$('btnDuplicate').onclick=()=>{ const o=buildOrcamento(); if(!o) return; const copy=JSON.parse(JSON.stringify(o)); copy.id=uid('o_'); copy.date=new Date().toISOString(); DB.orcamentos.unshift(copy); save(); renderHistory(); alert('Duplicado'); }
+$('btnClear').onclick=()=>{ if(confirm('Limpar formulário?')){ items=[]; renderItems(); $('clientName').value=''; $('clientPhone').value=''; $('discount').value=''; $('paymentMethod').value='dinheiro'; updateTotal(); }}
+
+function buildOrcamento(){ const client=$('clientName').value.trim(); if(!client) return alert('Nome do cliente é obrigatório'); if(!items.length) return alert('Adicione pelo menos um procedimento'); const sum = items.reduce((s,it)=>s + (Number(it.price||0)),0); const disc = Number($('discount').value||0); const total = Math.max(0,sum - disc); const o={ id:uid('o_'), category:$('category').value, client, phone:$('clientPhone').value.trim(), date:new Date().toISOString(), items:JSON.parse(JSON.stringify(items)), discount:disc, total, payment:$('paymentMethod').value, professional:'', note:'' }; return o; }
+
+// pdf (html2canvas + jsPDF)
+async function generatePDFfromOrc(o){ const { jsPDF } = window.jspdf; const wrap=document.createElement('div'); wrap.style.padding='18px'; wrap.style.width='700px'; wrap.style.background='#fff'; wrap.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center"><div><h2>Orçamento</h2><div>${o.client}</div><div class='small'>${o.phone||''}</div></div><div style='text-align:right'><div class='small'>${o.date.slice(0,10)}</div><div style='font-weight:700'>${money(o.total)}</div></div></div><hr>`;
+  const list=document.createElement('div'); o.items.forEach(it=>{ const d=document.createElement('div'); d.style.display='flex'; d.style.justifyContent='space-between'; d.style.marginTop='6px'; d.innerHTML=`<div>${it.name}</div><div>${money(it.price)}</div>`; list.appendChild(d); }); wrap.appendChild(list);
+  wrap.innerHTML += `<hr><div>Desconto: ${money(o.discount)}</div><div>Forma: ${o.payment}</div>`;
+  document.body.appendChild(wrap);
+  try{ const canvas = await html2canvas(wrap,{scale:1}); const imgData = canvas.toDataURL('image/png'); const pdf = new jsPDF('p','pt','a4'); const imgWidth = 595; const imgHeight = canvas.height * imgWidth / canvas.width; pdf.addImage(imgData,'PNG',0,0,imgWidth,imgHeight); pdf.save('orcamento_'+o.id+'.pdf'); }catch(err){alert('Erro ao gerar PDF: '+err.message)} finally{ document.body.removeChild(wrap); } }
+
+$('btnPDF').onclick=()=>{ const o=buildOrcamento(); if(!o) return; generatePDFfromOrc(o); }
+
+// history
+function renderHistory(){ const box=$('historyList'); box.innerHTML=''; const q=$('searchHistory').value.trim().toLowerCase(); const cat=$('filterCat').value; const list = DB.orcamentos.filter(o=>{ if(cat && o.category!==cat) return false; if(!q) return true; return (o.client||'').toLowerCase().includes(q) || (o.date||'').includes(q); }); if(!list.length) box.innerHTML='<div class="small">Nenhum orçamento salvo.</div>';
+  list.forEach(o=>{ const row=document.createElement('div'); row.className='item-row'; row.innerHTML=`<div style="flex:1"><strong>${o.client}</strong><div class=\"small\">${o.date.slice(0,10)} — ${o.category}</div></div><div style=\"display:flex;gap:6px\"><button class=\"input\" data-id=\"${o.id}\" data-act=\"open\">Abrir</button><button class=\"input\" data-id=\"${o.id}\" data-act=\"pdf\">PDF</button><button class=\"input\" data-id=\"${o.id}\" data-act=\"edit\">Editar</button><button class=\"input\" data-id=\"${o.id}\" data-act=\"del\">Apagar</button></div>`; box.appendChild(row); });
+  // attach
+  box.querySelectorAll('button').forEach(b=>{ b.onclick=()=>{ const id=b.dataset.id; const act=b.dataset.act; const orc=DB.orcamentos.find(x=>x.id===id); if(!orc) return; if(act==='open'){ previewOrcamento(orc); } if(act==='pdf'){ generatePDFfromOrc(orc); } if(act==='edit'){ loadOrcamentoToForm(orc); } if(act==='del'){ if(confirm('Apagar orçamento?')){ DB.orcamentos = DB.orcamentos.filter(x=>x.id!==id); save(); renderHistory(); } } } }); }
+
+function previewOrcamento(o){ const box=$('previewBox'); box.innerHTML = `<div><strong>${o.client}</strong><div class='small'>${o.date.slice(0,10)} — ${o.category}</div></div><div style='margin-top:8px'>`+ o.items.map(it=>`<div style='display:flex;justify-content:space-between'><div>${it.name}</div><div>${money(it.price)}</div></div>`).join('') + `</div><div style='margin-top:8px'><strong>Total: ${money(o.total)}</strong></div>`; // QR optional
+  const qbox=$('qrcode'); qbox.innerHTML=''; const text = `ORC|${o.id}|${o.client}|${o.total}`; new QRCode(qbox, { text, width:128, height:128 }); }
+
+function loadOrcamentoToForm(o){ $('category').value=o.category; $('clientName').value=o.client; $('clientPhone').value=o.phone; $('date').value = o.date.slice(0,10); items = JSON.parse(JSON.stringify(o.items)); $('discount').value = o.discount; $('paymentMethod').value = o.payment; renderItems(); }
+
+// import/export
+$('btnExportAll').onclick=()=>{ const blob=new Blob([JSON.stringify(DB,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='orcamentos_backup.json'; a.click(); URL.revokeObjectURL(url); }
+$('btnImport').onclick=()=>{ const input=document.createElement('input'); input.type='file'; input.accept='application/json'; input.onchange=()=>{ const f=input.files[0]; const r=new FileReader(); r.onload=e=>{ try{ const data=JSON.parse(e.target.result); if(data.orcamentos){ DB=data; save(); renderHistory(); alert('Importação completa'); } else alert('Arquivo inválido'); }catch(err){alert('Arquivo inválido')}}; r.readAsText(f)}; input.click(); }
+
+$('btnNew').onclick=()=>{ if(confirm('Criar novo orçamento? Os campos atuais serão perdidos.')){ items=[]; renderItems(); $('clientName').value=''; $('clientPhone').value=''; $('discount').value=''; $('paymentMethod').value='dinheiro'; $('category').value='estetica'; $('date').value=new Date().toISOString().slice(0,10); $('previewBox').innerHTML=''; $('qrcode').innerHTML=''; }}
+$('searchHistory').oninput=renderHistory; $('filterCat').onchange=renderHistory;
+
+// seed
+if(!DB.orcamentos.length){ DB.orcamentos.push({id:uid('o_'),category:'estetica',client:'Maria Silva',phone:'(11)99999-0001',date:new Date().toISOString(),items:[{name:'Botox',price:350},{name:'Preenchimento',price:800}],discount:50,total:1100,payment:'pix'}); save(); }
+renderItems(); renderHistory();
+
+console.log('Orçamentos 3-em-1 carregado');
+</script>
+</body>
+</html>
 
