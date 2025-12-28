@@ -1,1 +1,186 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Trena Digital – Protótipo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body{
+    margin:0;
+    background:#0b0f14;
+    color:#e0e0e0;
+    font-family:Arial,sans-serif;
+    text-align:center;
+}
+header{
+    padding:10px;
+    font-weight:bold;
+    background:#05080c;
+    border-bottom:1px solid #1f2a36;
+}
+#camera-container{
+    position:relative;
+    width:100%;
+    height:70vh;
+    background:black;
+}
+video{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    pointer-events:none; /* CRÍTICO */
+}
+.guide-line{
+    position:absolute;
+    top:0;
+    bottom:0;
+    left:50%;
+    width:2px;
+    background:#00e5ff;
+    box-shadow:0 0 10px #00e5ff;
+}
+.center-point{
+    position:absolute;
+    top:50%;
+    left:50%;
+    width:10px;
+    height:10px;
+    background:#00e5ff;
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    box-shadow:0 0 12px #00e5ff;
+}
+.controls{
+    padding:15px;
+    position:relative;
+    z-index:10; /* CRÍTICO */
+}
+button{
+    background:#111820;
+    color:#00e5ff;
+    border:1px solid #00e5ff;
+    padding:12px 18px;
+    margin:5px;
+    font-size:16px;
+    border-radius:6px;
+}
+#result{
+    margin-top:10px;
+    font-size:22px;
+    color:#7ffcff;
+}
+.measuring{
+    color:#00ff88;
+    font-weight:bold;
+}
+footer{
+    font-size:12px;
+    opacity:0.6;
+}
+</style>
+</head>
+
+<body>
+
+<header>📏 TRENA DIGITAL – PROTÓTIPO</header>
+
+<div id="camera-container">
+    <video id="video" playsinline></video>
+    <div class="guide-line"></div>
+    <div class="center-point"></div>
+</div>
+
+<div class="controls">
+    <button id="btnStart">▶ Iniciar</button>
+    <button id="btnMeasure">📐 Medir</button>
+    <button id="btnStop">■ Finalizar</button>
+    <div id="result">Sistema pronto</div>
+</div>
+
+<footer>
+Protótipo técnico • Teste real em celular
+</footer>
+
+<script>
+let stream = null;
+let interval = null;
+let startTime = 0;
+let currentMeters = 0;
+
+const video = document.getElementById("video");
+const result = document.getElementById("result");
+
+const btnStart = document.getElementById("btnStart");
+const btnMeasure = document.getElementById("btnMeasure");
+const btnStop = document.getElementById("btnStop");
+
+bind(btnStart, openCamera);
+bind(btnMeasure, startMeasure);
+bind(btnStop, stopAll);
+
+function bind(el, fn){
+    el.addEventListener("touchstart", fn, { passive:true });
+    el.addEventListener("click", fn);
+}
+
+// INICIAR
+async function openCamera(){
+    if(stream) return;
+
+    try{
+        stream = await navigator.mediaDevices.getUserMedia({
+            video:{ facingMode:"environment" },
+            audio:false
+        });
+
+        video.srcObject = stream;
+        await video.play();
+
+        result.innerText = "Câmera aberta. Alinhe e toque em MEDIR.";
+
+    }catch{
+        alert("Permita o acesso à câmera");
+    }
+}
+
+// MEDIR (AGORA FUNCIONA)
+function startMeasure(){
+    if(interval) return;
+
+    startTime = Date.now();
+    currentMeters = 0;
+    result.classList.add("measuring");
+
+    interval = setInterval(()=>{
+        const elapsed = (Date.now() - startTime) / 1000;
+        currentMeters = elapsed * 0.5;
+        result.innerText = `${currentMeters.toFixed(2)} m`;
+    },100);
+}
+
+// FINALIZAR
+function stopAll(){
+    if(interval){
+        clearInterval(interval);
+        interval = null;
+    }
+
+    result.classList.remove("measuring");
+
+    if(currentMeters > 0){
+        result.innerText = `Distância final: ${currentMeters.toFixed(2)} m`;
+    }else{
+        result.innerText = "Sistema finalizado";
+    }
+
+    if(stream){
+        stream.getTracks().forEach(t=>t.stop());
+        stream = null;
+    }
+}
+</script>
+
+</body>
+</html>
 
