@@ -1,1 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Trena Digital – Protótipo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+body {
+    margin: 0;
+    background: #0b0f14;
+    color: #e0e0e0;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+
+header {
+    padding: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    background: #05080c;
+    border-bottom: 1px solid #1f2a36;
+}
+
+#camera-container {
+    position: relative;
+    width: 100%;
+    height: 70vh;
+    background: black;
+    overflow: hidden;
+}
+
+video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.guide-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    background: #00e5ff;
+    box-shadow: 0 0 10px #00e5ff;
+}
+
+.center-point {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    background: #00e5ff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 12px #00e5ff;
+}
+
+.controls {
+    padding: 15px;
+}
+
+button {
+    background: #111820;
+    color: #00e5ff;
+    border: 1px solid #00e5ff;
+    padding: 12px 20px;
+    margin: 5px;
+    font-size: 16px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+button:active {
+    background: #00e5ff;
+    color: #000;
+}
+
+#result {
+    margin-top: 10px;
+    font-size: 22px;
+    color: #7ffcff;
+}
+
+.measuring {
+    color: #00ff88;
+    font-weight: bold;
+}
+
+footer {
+    font-size: 12px;
+    opacity: 0.6;
+    margin-top: 8px;
+}
+</style>
+</head>
+
+<body>
+
+<header>📏 TRENA DIGITAL – PROTÓTIPO</header>
+
+<div id="camera-container">
+    <video id="video" autoplay playsinline></video>
+    <div class="guide-line"></div>
+    <div class="center-point"></div>
+</div>
+
+<div class="controls">
+    <button onclick="startMeasure()">▶ Iniciar</button>
+    <button onclick="endMeasure()">■ Finalizar</button>
+    <div id="result">0.00 m</div>
+</div>
+
+<footer>
+Protótipo técnico • Medição simulada em tempo real
+</footer>
+
+<script>
+let stream = null;
+let startTime = null;
+let measureInterval = null;
+let currentMeters = 0;
+
+// Inicia a câmera traseira
+async function startCamera() {
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: "environment" },
+            audio: false
+        });
+        document.getElementById("video").srcObject = stream;
+    } catch (e) {
+        alert("Erro ao acessar a câmera");
+    }
+}
+
+// Inicia a medição (números sobem)
+function startMeasure() {
+    if (measureInterval) return;
+
+    startTime = Date.now();
+    currentMeters = 0;
+
+    const result = document.getElementById("result");
+    result.classList.add("measuring");
+    result.innerText = "0.00 m";
+
+    measureInterval = setInterval(() => {
+        const elapsed = (Date.now() - startTime) / 1000;
+
+        // FATOR DE SIMULAÇÃO (AJUSTÁVEL)
+        currentMeters = elapsed * 0.5;
+
+        result.innerText = `${currentMeters.toFixed(2)} m`;
+    }, 100);
+}
+
+// Finaliza a medição (para os números)
+function endMeasure() {
+    if (!startTime) {
+        alert("Inicie a medição primeiro");
+        return;
+    }
+
+    clearInterval(measureInterval);
+    measureInterval = null;
+    startTime = null;
+
+    const result = document.getElementById("result");
+    result.classList.remove("measuring");
+    result.innerText = `Distância final: ${currentMeters.toFixed(2)} m`;
+}
+
+// Inicializa
+startCamera();
+</script>
+
+</body>
+</html>
 
