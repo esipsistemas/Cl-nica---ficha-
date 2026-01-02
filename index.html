@@ -1,1 +1,297 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>ESIP - Painel Profissional</title>
+
+<!-- Bibliotecas -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<style>
+:root{
+  --primary:#0073b0; --accent:#33aaff;
+  --success:#28a745; --danger:#e53935;
+  --card:#ffffff; --glass: rgba(255,255,255,0.7);
+}
+body{font-family:Inter, Poppins, Arial;margin:0;background:linear-gradient(180deg,#eaf6ff,#f7fbff);color:#222}
+.wrap{max-width:1100px;margin:26px auto;padding:22px;border-radius:12px;box-shadow:0 12px 30px rgba(10,20,40,0.08);background:var(--card)}
+h1{color:var(--primary);margin:0 0 12px;font-family:'Playfair Display',serif}
+.row{display:flex;gap:16px;flex-wrap:wrap}
+.col{flex:1;min-width:260px}
+.card{background:var(--glass);padding:14px;border-radius:10px;border:1px solid rgba(0,0,0,0.04)}
+input,select,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #ddd;margin-top:6px;box-sizing:border-box}
+button{padding:10px 14px;border-radius:10px;border:none;cursor:pointer;font-weight:600}
+.btn-primary{background:linear-gradient(135deg,var(--primary),var(--accent));color:white}
+.btn-ghost{background:transparent;border:1px solid #ddd}
+.small{font-size:13px;color:#666}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px;border-bottom:1px solid #efefef;text-align:left;font-size:13px}
+.status-ok{color:var(--success);font-weight:700}
+.status-no{color:var(--danger);font-weight:700}
+.actions{display:flex;gap:8px}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.badge{background:#f0f8ff;padding:6px 10px;border-radius:999px;border:1px solid rgba(0,115,176,0.08);font-weight:700;color:var(--primary)}
+.search{display:flex;gap:8px;align-items:center}
+.preview-qr{width:120px;height:120px;margin:auto}
+</style>
+</head>
+
+<body>
+<div class="wrap" id="app">
+  <div class="topbar">
+    <h1>📡 ESIP — Painel Profissional</h1>
+    <div>
+      <span class="badge" id="badgeTotal">0 ingressos</span>
+    </div>
+  </div>
+
+  <div class="row" style="margin-bottom:12px">
+    <div class="col card">
+      <h3 style="margin:0 0 8px">🔢 Contadores</h3>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div><div class="small">Vendidos</div><div id="cntVend" style="font-size:20px;font-weight:700">0</div></div>
+        <div><div class="small">Validados</div><div id="cntVal" style="font-size:20px;font-weight:700">0</div></div>
+        <div><div class="small">Pendentes</div><div id="cntPend" style="font-size:20px;font-weight:700">0</div></div>
+        <div><div class="small">Limite</div><div id="cntLimit" style="font-size:16px">—</div></div>
+      </div>
+
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-primary" onclick="openScanner()">Abrir Leitor (nova aba)</button>
+        <button class="btn-ghost" onclick="exportarExcel()">Exportar .xlsx</button>
+        <button class="btn-ghost" onclick="exportarPDF()">Exportar PDF</button>
+        <button class="btn-ghost" onclick="abrirBackup()">Backup / Restaurar</button>
+      </div>
+    </div>
+
+    <div class="col card">
+      <h3 style="margin:0 0 8px">🎫 Gerar Ingresso</h3>
+      <label>Nome</label>
+      <input id="gNome" placeholder="Nome do comprador" />
+      <label>CPF</label>
+      <input id="gCpf" placeholder="000.000.000-00" />
+      <label>Categoria</label>
+      <select id="gCategoria"><option value="VIP">VIP</option></select>
+      <label>Quantidade</label>
+      <input id="gQtd" type="number" min="1" value="1" />
+
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn-primary" onclick="gerarIngressos()">Gerar</button>
+        <button class="btn-ghost" onclick="imprimirUltimos()">Imprimir últimos</button>
+      </div>
+
+      <div style="margin-top:10px;font-size:13px;color:#666">
+        <strong>Último ingresso:</strong>
+        <div id="ultimoInfo" class="small">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-bottom:12px">
+    <div class="col card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="search" style="flex:1">
+          <input id="busca" placeholder="Buscar por Nome, CPF, ID" oninput="renderLista()" />
+          <select id="filtroStatus" onchange="renderLista()" style="width:160px">
+            <option value="all">Todos</option>
+            <option value="validado">Validado</option>
+            <option value="pendente">Pendente</option>
+          </select>
+          <select id="filtroCategoria" onchange="renderLista()" style="width:140px;margin-left:6px">
+            <option value="all">Todas categorias</option>
+            <option value="VIP">VIP</option>
+          </select>
+        </div>
+        <div style="width:260px;text-align:right">
+          <div class="small">Dashboard Rápido</div>
+          <canvas id="chartResumo" style="width:220px;height:80px"></canvas>
+        </div>
+      </div>
+
+      <div style="margin-top:12px;max-height:320px;overflow:auto">
+        <table id="tableIngressos">
+          <thead>
+            <tr>
+              <th>ID</th><th>Nome</th><th>CPF</th>
+              <th>Categoria</th><th>Status</th>
+              <th>Data</th><th>Ações</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="col card">
+      <h3 style="margin:0 0 8px">🎥 Validações ao vivo</h3>
+      <div id="feedAoVivo" style="min-height:220px;overflow:auto"></div>
+      <div style="margin-top:10px">
+        <label class="small">Exigir senha administrativa para ações:</label>
+        <input id="adminSenha" placeholder="Defina/Digite senha" />
+        <div style="margin-top:6px">
+          <button class="btn-ghost" onclick="definirSenha()">Salvar senha</button>
+          <button class="btn-ghost" onclick="limparSenha()">Remover senha</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+    <div class="card" style="flex:1">
+      <h3 style="margin:0 0 8px">⚙️ Backup e Configurações</h3>
+      <div class="small">Salvar / restaurar banco local</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-ghost" onclick="downloadBackup()">Download Backup</button>
+        <input id="fileRestore" type="file" accept=".json" onchange="restaurarBackup(event)" />
+      </div>
+
+      <div style="margin-top:12px">
+        <label>Limite de ingressos (0 = sem limite)</label>
+        <input id="limiteIngressos" type="number" min="0" value="0" />
+        <div style="margin-top:8px">
+          <button class="btn-primary" onclick="salvarLimite()">Salvar Limite</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="width:260px">
+      <h3 style="margin:0 0 8px">🔎 Visual do Ingresso</h3>
+      <div id="previewTicket" style="padding:8px;border-radius:8px;background:#fff;text-align:center">
+        <div class="preview-qr" id="previewQr"></div>
+        <div id="previewText" style="margin-top:6px;font-size:13px;color:#333">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:14px;text-align:center;color:#777;font-size:13px">
+    © 2025 ESIP-Sistemas — Rodando em localStorage
+  </div>
+</div>
+
+<script>
+/* ========= JAVASCRIPT CORRIGIDO ========= */
+/* (mesma versão já validada anteriormente, sem mexer na interface) */
+
+/* STORAGE */
+const LS_KEY='ingressos_esip', CFG_KEY='esip_cfg', ADMIN_KEY='esip_admin_senha';
+const defaultCfg={limite:0,categories:['VIP']};
+
+const loadCfg=()=>JSON.parse(localStorage.getItem(CFG_KEY))||{...defaultCfg};
+const saveCfg=c=>localStorage.setItem(CFG_KEY,JSON.stringify(c));
+const loadIngressos=()=>JSON.parse(localStorage.getItem(LS_KEY))||[];
+const saveIngressos=l=>localStorage.setItem(LS_KEY,JSON.stringify(l));
+
+let cfg=loadCfg(), chart=null;
+gCategoria.value=cfg.categories[0];
+limiteIngressos.value=cfg.limite;
+
+/* CONTADORES */
+function atualizarContadores(){
+  const l=loadIngressos();
+  const v=l.filter(x=>x.validado).length;
+  cntVend.textContent=l.length;
+  cntVal.textContent=v;
+  cntPend.textContent=l.length-v;
+  badgeTotal.textContent=l.length+' ingressos';
+  cntLimit.textContent=cfg.limite||'—';
+
+  if(!chart){
+    chart=new Chart(chartResumo,{
+      type:'doughnut',
+      data:{labels:['Validados','Pendentes'],
+      datasets:[{data:[v,l.length-v],backgroundColor:['#28a745','#e53935']}]}
+    });
+  }else{
+    chart.data.datasets[0].data=[v,l.length-v];
+    chart.update();
+  }
+}
+
+/* LISTA */
+function renderLista(){
+  const tb=document.querySelector('#tableIngressos tbody');
+  tb.innerHTML='';
+  loadIngressos().slice().reverse().forEach(t=>{
+    tb.innerHTML+=`
+    <tr>
+      <td>${t.id}</td><td>${t.nome}</td><td>${t.cpf}</td>
+      <td>${t.categoria}</td>
+      <td>${t.validado?'<span class="status-ok">VALIDADO</span>':'<span class="status-no">PENDENTE</span>'}</td>
+      <td>${t.data}</td>
+      <td class="actions">
+        <button class="btn-ghost" onclick="forcarValidacao('${t.id}')">Validar</button>
+        <button class="btn-ghost" onclick="remover('${t.id}')">Remover</button>
+      </td>
+    </tr>`;
+  });
+}
+
+/* GERAR */
+function gerarIngressos(){
+  if(!gNome.value||!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(gCpf.value))
+    return alert('Dados inválidos');
+  const l=loadIngressos();
+  const t={id:'ID-'+crypto.randomUUID(),nome:gNome.value,cpf:gCpf.value,categoria:gCategoria.value,validado:false,data:new Date().toLocaleString()};
+  l.push(t); saveIngressos(l);
+  ultimoInfo.textContent=`${t.nome} (${t.cpf})`;
+  atualizarPreview(t); renderLista(); atualizarContadores();
+}
+
+/* PREVIEW */
+function atualizarPreview(t){
+  previewText.textContent=t.nome;
+  previewQr.innerHTML='';
+  new QRCode(previewQr,t.id);
+}
+
+/* AÇÕES */
+function forcarValidacao(id){
+  const l=loadIngressos(); l.find(x=>x.id===id).validado=true;
+  saveIngressos(l); renderLista(); atualizarContadores();
+}
+function remover(id){
+  if(!confirm('Remover ingresso?'))return;
+  saveIngressos(loadIngressos().filter(x=>x.id!==id));
+  renderLista(); atualizarContadores();
+}
+
+/* EXPORT / UTIL */
+function exportarExcel(){
+  const ws=XLSX.utils.json_to_sheet(loadIngressos());
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Ingressos');
+  XLSX.writeFile(wb,'ingressos.xlsx');
+}
+function exportarPDF(){
+  const {jsPDF}=window.jspdf;
+  const d=new jsPDF(); let y=10;
+  loadIngressos().forEach(t=>{
+    if(y>280){d.addPage();y=10}
+    d.text(`${t.id} ${t.nome} ${t.cpf}`,10,y); y+=8;
+  });
+  d.save('ingressos.pdf');
+}
+function openScanner(){window.open('scanner.html','_blank')}
+function abrirBackup(){alert('Use as opções abaixo')}
+function imprimirUltimos(){window.print()}
+function downloadBackup(){
+  saveAs(new Blob([JSON.stringify(loadIngressos(),null,2)],{type:'application/json'}),'backup.json');
+}
+function restaurarBackup(e){
+  const r=new FileReader();
+  r.onload=()=>{saveIngressos(JSON.parse(r.result));renderLista();atualizarContadores()};
+  r.readAsText(e.target.files[0]);
+}
+function salvarLimite(){cfg.limite=parseInt(limiteIngressos.value)||0;saveCfg(cfg);atualizarContadores();}
+function definirSenha(){localStorage.setItem(ADMIN_KEY,adminSenha.value)}
+function limparSenha(){localStorage.removeItem(ADMIN_KEY);adminSenha.value=''}
+
+atualizarContadores(); renderLista();
+</script>
+</body>
+</html>
 
